@@ -3,7 +3,9 @@ const http = require('http'), crypto = require('crypto');
 const KEY = process.env.ANTHROPIC_API_KEY, MODEL = process.env.MODEL || 'claude-sonnet-5-5';
 const ORIGIN = process.env.ALLOWED_ORIGIN || '*', PORT = process.env.PORT || 3000;
 const WA_TOKEN = process.env.WHATSAPP_TOKEN, WA_PHONE = process.env.WHATSAPP_PHONE_ID, WA_VERIFY = process.env.WHATSAPP_VERIFY_TOKEN;
-if (!KEY) { console.error('Il manque ANTHROPIC_API_KEY.'); process.exit(1); }
+const GKEY = process.env.GEMINI_API_KEY, GMODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+const PROVIDER = process.env.PROVIDER || (KEY ? 'anthropic' : 'gemini'); // 'gemini' = clé gratuite Google AI Studio
+if ((PROVIDER === 'anthropic' && !KEY) || (PROVIDER === 'gemini' && !GKEY)) { console.error('Il manque la clé : GEMINI_API_KEY (gratuit) ou ANTHROPIC_API_KEY.'); process.exit(1); }
 
 const BASE = "Tu es Newton IA, un assistant camerounais clair, chaleureux et précis. ";
 const LANGS = {
@@ -20,7 +22,7 @@ const MODES = {
 };
 const IMG = /^data:(image\/(?:jpeg|png|webp|gif));base64,([A-Za-z0-9+/=]+)$/;
 
-async function callClaude(messages, mode, lang) {
+async function callAnthropic(messages, mode, lang) {
   const msgs = messages.slice(-20).map(m => {
     const text = String(m.content || '').slice(0, 8000), im = typeof m.image === 'string' && m.image.match(IMG);
     return {
@@ -37,6 +39,26 @@ async function callClaude(messages, mode, lang) {
   if (!r.ok) throw new Error('anthropic ' + r.status);
   return j.content.filter(b => b.type === 'text').map(b => b.text).join('');
 }
+
+async function callGemini(messages, mode, lang) {
+  let contents = messages.slice(-20).map(m => {
+    const text = String(m.content || '').slice(0, 8000), im = typeof m.image === 'string' && m.image.match(IMG), parts = [];
+    if (im) parts.push({ inlineData: { mimeType: im[1], data: im[2] } });
+    parts.push({ text: text || 'Analyse cette image.' });
+    return { role: m.role === 'user' ? 'user' : 'model', parts };
+  });
+  while (contents.length && contents[0].role !== 'user') contents.shift();
+  const r = await fetch('https://generativelanguage.googleapis.com/v1beta/models/' + GMODEL + ':generateContent', {
+    method: 'POST',
+    headers: { 'x-goog-api-key': GKEY, 'content-type': 'application/json' },
+    body: JSON.stringify({ systemInstruction: { parts: [{ text: BASE + (LANGS[lang] || LANGS.auto) + (MODES[mode] || '') }] }, contents, generationConfig: { maxOutputTokens: 1500 } })
+  });
+  const j = await r.json();
+  if (!r.ok) { console.error('gemini', r.status, JSON.stringify(j).slice(0, 300)); throw new Error('gemini ' + r.status); }
+  const t = ((j.candidates || [])[0]?.content?.parts || []).map(p => p.text || '').join('');
+  return t || "Je n'ai pas pu répondre à cette demande. Reformule ou change de sujet.";
+}
+const callClaude = (m, mode, lang) => PROVIDER === 'gemini' ? callGemini(m, mode, lang) : callAnthropic(m, mode, lang);
 
 const hits = new Map(); // 20 messages par minute et par adresse ou numéro
 function limited(id) {
