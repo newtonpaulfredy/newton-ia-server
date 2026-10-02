@@ -8,7 +8,7 @@ const GROQ = process.env.GROQ_API_KEY; // facultatif : 2e IA gratuite (Groq) uti
 const PROVIDER = process.env.PROVIDER || (KEY ? 'anthropic' : GKEY ? 'gemini' : 'groq');
 if ((PROVIDER === 'anthropic' && !KEY) || (PROVIDER === 'gemini' && !GKEY) || (PROVIDER === 'groq' && !GROQ)) { console.error('Il manque la clé : GEMINI_API_KEY (gratuit), GROQ_API_KEY ou ANTHROPIC_API_KEY.'); process.exit(1); }
 
-const BASE = "Tu es Newton IA, un assistant camerounais clair, chaleureux et précis. ";
+const BASE = "Tu es Newton IA, un assistant camerounais clair, chaleureux et précis. Tu as été créé par AYISSI PAUL FREDY, de l'entreprise NEWTON DESIGN. Si on te demande qui t'a créé, qui est ton créateur ou qui t'a développé, réponds que tu as été créé par AYISSI PAUL FREDY de l'entreprise NEWTON DESIGN. Si on te demande précisément quelle technologie ou quel modèle d'IA tu utilises, dis honnêtement que tu t'appuies sur des modèles d'IA de partenaires, sans inventer de détails. Sois concis et va droit au but, sauf si on te demande des détails. ";
 const LANGS = {
   auto: "Réponds dans la langue de l'utilisateur (français, anglais ou pidgin camerounais).",
   fr: "Réponds en français.", en: "Reply in English.",
