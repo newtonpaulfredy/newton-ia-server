@@ -4,9 +4,9 @@ const KEY = process.env.ANTHROPIC_API_KEY, MODEL = process.env.MODEL || 'claude-
 const ORIGIN = process.env.ALLOWED_ORIGIN || '*', PORT = process.env.PORT || 3000;
 const WA_TOKEN = process.env.WHATSAPP_TOKEN, WA_PHONE = process.env.WHATSAPP_PHONE_ID, WA_VERIFY = process.env.WHATSAPP_VERIFY_TOKEN;
 const GKEY = process.env.GEMINI_API_KEY, GMODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
-const GROQ = process.env.GROQ_API_KEY; // facultatif : 2e IA gratuite (Groq) utilisée si Gemini est surchargé
-const PROVIDER = process.env.PROVIDER || (KEY ? 'anthropic' : GKEY ? 'gemini' : 'groq');
-if ((PROVIDER === 'anthropic' && !KEY) || (PROVIDER === 'gemini' && !GKEY) || (PROVIDER === 'groq' && !GROQ)) { console.error('Il manque la clé : GEMINI_API_KEY (gratuit), GROQ_API_KEY ou ANTHROPIC_API_KEY.'); process.exit(1); }
+const GROQ = process.env.GROQ_API_KEY;
+const PROVIDER = process.env.PROVIDER || (KEY? 'anthropic' : GKEY? 'gemini' : 'groq');
+if ((PROVIDER === 'anthropic' &&!KEY) || (PROVIDER === 'gemini' &&!GKEY) || (PROVIDER === 'groq' &&!GROQ)) { console.error('Il manque la clé : GEMINI_API_KEY (gratuit), GROQ_API_KEY ou ANTHROPIC_API_KEY.'); process.exit(1); }
 
 const BASE = "Tu es Newton IA, un assistant camerounais clair, chaleureux et précis. Tu as été créé par AYISSI PAUL FREDY, de l'entreprise NEWTON DESIGN. Si on te demande qui t'a créé, qui est ton créateur ou qui t'a développé, réponds que tu as été créé par AYISSI PAUL FREDY de l'entreprise NEWTON DESIGN. Si on te demande précisément quelle technologie ou quel modèle d'IA tu utilises, dis honnêtement que tu t'appuies sur des modèles d'IA de partenaires, sans inventer de détails. Sois concis et va droit au but, sauf si on te demande des détails. Tu ne crées pas toi-même de fichiers ni d'images : si on te demande un PDF, rédige le texte final complet et dis à l'utilisateur d'appuyer sur le bouton « PDF » sous ta réponse ; si on te demande une affiche, propose le titre, l'accroche, la date, le lieu et le contact, et dis d'utiliser Outils puis « Affiches » dans le menu. ";
 const LANGS = {
@@ -27,8 +27,8 @@ async function callAnthropic(messages, mode, lang) {
   const msgs = messages.slice(-20).map(m => {
     const text = String(m.content || '').slice(0, 8000), im = typeof m.image === 'string' && m.image.match(IMG);
     return {
-      role: m.role === 'user' ? 'user' : 'assistant',
-      content: im ? [{ type: 'image', source: { type: 'base64', media_type: im[1], data: im[2] } }, { type: 'text', text: text || 'Analyse cette image.' }] : text
+      role: m.role === 'user'? 'user' : 'assistant',
+      content: im? [{ type: 'image', source: { type: 'base64', media_type: im[1], data: im[2] } }, { type: 'text', text: text || 'Analyse cette image.' }] : text
     };
   });
   const r = await fetch('https://api.anthropic.com/v1/messages', {
@@ -43,14 +43,14 @@ async function callAnthropic(messages, mode, lang) {
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 let gList = null, gAt = 0;
-async function geminiModels() { // modèles « flash » disponibles pour ta clé, du plus récent au plus léger
+async function geminiModels() {
   if (gList && Date.now() - gAt < 600000) return gList;
   const r = await fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=200', { headers: { 'x-goog-api-key': GKEY } });
   const j = await r.json();
   const ok = (j.models || []).filter(m => (m.supportedGenerationMethods || []).includes('generateContent'))
-    .map(m => m.name.replace('models/', '')).filter(n => /^gemini-[\d.]+-flash(-lite)?$/.test(n));
+   .map(m => m.name.replace('models/', '')).filter(n => /^gemini-[\d.]+-flash(-lite)?$/.test(n));
   ok.sort((a, b) => parseFloat(b.split('-')[1]) - parseFloat(a.split('-')[1]) || (a.endsWith('-lite') - b.endsWith('-lite')));
-  gList = [process.env.GEMINI_MODEL, ...ok].filter((x, i, a) => x && a.indexOf(x) === i); gAt = Date.now();
+  gList = [process.env.GEMINI_MODEL,...ok].filter((x, i, a) => x && a.indexOf(x) === i); gAt = Date.now();
   return gList;
 }
 async function callGemini(messages, mode, lang) {
@@ -58,15 +58,15 @@ async function callGemini(messages, mode, lang) {
     const text = String(m.content || '').slice(0, 8000), im = typeof m.image === 'string' && m.image.match(IMG), parts = [];
     if (im) parts.push({ inlineData: { mimeType: im[1], data: im[2] } });
     parts.push({ text: text || 'Analyse cette image.' });
-    return { role: m.role === 'user' ? 'user' : 'model', parts };
+    return { role: m.role === 'user'? 'user' : 'model', parts };
   });
-  while (contents.length && contents[0].role !== 'user') contents.shift();
+  while (contents.length && contents[0].role!== 'user') contents.shift();
   const body = JSON.stringify({ systemInstruction: { parts: [{ text: BASE + (LANGS[lang] || LANGS.auto) + (MODES[mode] || '') }] }, contents, generationConfig: { maxOutputTokens: 4096 } });
   let last = 'gemini';
-  for (let round = 0; round < 3; round++) {          // 3 tours, avec une courte pause entre chaque
+  for (let round = 0; round < 3; round++) {
     let models = [];
     try { models = await geminiModels(); } catch (e) { last = 'gemini réseau'; }
-    for (const m of models.slice(0, 3)) {             // si un modèle est surchargé, on essaie le suivant
+    for (const m of models.slice(0, 3)) {
       let r, j;
       try { r = await fetch('https://generativelanguage.googleapis.com/v1beta/models/' + m + ':generateContent', { method: 'POST', headers: { 'x-goog-api-key': GKEY, 'content-type': 'application/json' }, body }); j = await r.json(); }
       catch (e) { last = 'gemini réseau'; continue; }
@@ -76,17 +76,17 @@ async function callGemini(messages, mode, lang) {
         return t || "Je n'ai pas pu répondre à cette demande. Reformule ou change de sujet.";
       }
       last = 'gemini ' + r.status; console.error(last, m, JSON.stringify(j).slice(0, 200));
-      if (r.status === 400 || r.status === 403) throw new Error(last); // clé refusée ou requête invalide : inutile de réessayer
+      if (r.status === 400 || r.status === 403) throw new Error(last);
     }
     if (round < 2) await sleep(1000 * (round + 1));
   }
   throw new Error(last);
 }
-async function callGroq(messages, mode, lang) { // 2e IA gratuite (API compatible OpenAI)
+async function callGroq(messages, mode, lang) {
   const rec = messages.slice(-12), lastM = rec[rec.length - 1] || {}, hasImg = typeof lastM.image === 'string' && IMG.test(lastM.image);
   const msgs = [{ role: 'system', content: BASE + (LANGS[lang] || LANGS.auto) + (MODES[mode] || '') }].concat(rec.map((m, i) => {
     const text = String(m.content || '').slice(0, 8000) || 'Analyse cette image.';
-    return { role: m.role === 'user' ? 'user' : 'assistant', content: hasImg && i === rec.length - 1 ? [{ type: 'text', text }, { type: 'image_url', image_url: { url: m.image } }] : text };
+    return { role: m.role === 'user'? 'user' : 'assistant', content: hasImg && i === rec.length - 1? [{ type: 'text', text }, { type: 'image_url', image_url: { url: m.image } }] : text };
   }));
   const model = hasImg? (process.env.GROQ_VISION_MODEL || 'meta-llama/llama-4-scout-17b-16e-instruct') : (process.env.GROQ_MODEL || 'openai/gpt-oss-20b');
   const r = await fetch('https://api.groq.com/openai/v1/chat/completions', {
@@ -105,7 +105,7 @@ async function callClaude(m, mode, lang) {
   catch (e) { if (!GROQ) throw e; console.error('Gemini indisponible (' + e.message + '), bascule vers Groq'); return callGroq(m, mode, lang); }
 }
 
-const hits = new Map(); // 20 messages par minute et par adresse ou numéro
+const hits = new Map();
 function limited(id) {
   if (hits.size > 5000) hits.clear();
   const now = Date.now(), h = (hits.get(id) || []).filter(t => now - t < 60000);
@@ -140,7 +140,7 @@ async function waImage(id) {
 function okSig(raw, sig) {
   const s = process.env.WHATSAPP_APP_SECRET; if (!s) return true;
   const h = 'sha256=' + crypto.createHmac('sha256', s).update(raw).digest('hex');
-  return !!sig && sig.length === h.length && crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(h));
+  return!!sig && sig.length === h.length && crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(h));
 }
 async function handleWA(m) {
   const from = m.from;
@@ -159,10 +159,22 @@ async function handleWA(m) {
 
 http.createServer((req, res) => {
   const url = new URL(req.url, 'http://x');
-  if (url.pathname === '/whatsapp') {
-    if (!WA_TOKEN || !WA_PHONE || !WA_VERIFY) return send(res, 404, {}, false);
+
+  // PAGE D'ACCUEIL POUR TEST
+  if (url.pathname === '/' && req.method === 'GET') {
+    res.writeHead(200, {'Content-Type':'text/html'});
+    return res.end('<h1>Newton IA OK</h1><p>Serveur en ligne sur port '+PORT+'</p><p>Routes: /webhook et /whatsapp</p>');
+  }
+
+  // CORRECTION : on accepte /webhook ET /whatsapp
+  if (url.pathname === '/whatsapp' || url.pathname === '/webhook') {
+    if (!WA_TOKEN ||!WA_PHONE ||!WA_VERIFY) return send(res, 404, {}, false);
     if (req.method === 'GET') {
-      if (url.searchParams.get('hub.mode') === 'subscribe' && url.searchParams.get('hub.verify_token') === WA_VERIFY) { res.writeHead(200); return res.end(url.searchParams.get('hub.challenge')); }
+      console.log('Verification attempt - token recu:', url.searchParams.get('hub.verify_token'), ' attendu:', WA_VERIFY);
+      if (url.searchParams.get('hub.mode') === 'subscribe' && url.searchParams.get('hub.verify_token') === WA_VERIFY) {
+        console.log('WEBHOOK VERIFIE!');
+        res.writeHead(200); return res.end(url.searchParams.get('hub.challenge'));
+      }
       res.writeHead(403); return res.end();
     }
     return readBody(req, raw => {
@@ -172,12 +184,12 @@ http.createServer((req, res) => {
     });
   }
   if (req.method === 'OPTIONS') return send(res, 204, {});
-  if (req.method !== 'POST' || url.pathname !== '/chat') return send(res, 404, { reply: 'Introuvable.' });
+  if (req.method!== 'POST' || url.pathname!== '/chat') return send(res, 404, { reply: 'Introuvable.' });
   if (limited(req.socket.remoteAddress)) return send(res, 429, { reply: 'Trop de messages. Réessaie dans une minute.' });
   readBody(req, async raw => {
     try {
       const { messages, mode, lang } = JSON.parse(raw);
       send(res, 200, { reply: await callClaude(messages || [], mode, lang) });
-    } catch (e) { console.error('chat', e.message); send(res, 400, { reply: /50\d|429|réseau/.test(e.message) ? 'Newton est très sollicité en ce moment (' + e.message + '). Réessaie dans quelques secondes.' : 'Service IA indisponible (' + e.message + ').' }); }
+    } catch (e) { console.error('chat', e.message); send(res, 400, { reply: /50\d|429|réseau/.test(e.message)? 'Newton est très sollicité en ce moment (' + e.message + '). Réessaie dans quelques secondes.' : 'Service IA indisponible (' + e.message + ').' }); }
   });
 }).listen(PORT, () => console.log('Newton écoute sur le port ' + PORT));
