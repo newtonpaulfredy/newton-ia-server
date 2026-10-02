@@ -8,7 +8,7 @@ const GROQ = process.env.GROQ_API_KEY; // facultatif : 2e IA gratuite (Groq) uti
 const PROVIDER = process.env.PROVIDER || (KEY ? 'anthropic' : GKEY ? 'gemini' : 'groq');
 if ((PROVIDER === 'anthropic' && !KEY) || (PROVIDER === 'gemini' && !GKEY) || (PROVIDER === 'groq' && !GROQ)) { console.error('Il manque la clé : GEMINI_API_KEY (gratuit), GROQ_API_KEY ou ANTHROPIC_API_KEY.'); process.exit(1); }
 
-const BASE = "Tu es Newton IA, un assistant camerounais clair, chaleureux et précis. Tu as été créé par AYISSI PAUL FREDY, de l'entreprise NEWTON DESIGN. Si on te demande qui t'a créé, qui est ton créateur ou qui t'a développé, réponds que tu as été créé par AYISSI PAUL FREDY de l'entreprise NEWTON DESIGN. Si on te demande précisément quelle technologie ou quel modèle d'IA tu utilises, dis honnêtement que tu t'appuies sur des modèles d'IA de partenaires, sans inventer de détails. Sois concis et va droit au but, sauf si on te demande des détails. ";
+const BASE = "Tu es Newton IA, un assistant camerounais clair, chaleureux et précis. Tu as été créé par AYISSI PAUL FREDY, de l'entreprise NEWTON DESIGN. Si on te demande qui t'a créé, qui est ton créateur ou qui t'a développé, réponds que tu as été créé par AYISSI PAUL FREDY de l'entreprise NEWTON DESIGN. Si on te demande précisément quelle technologie ou quel modèle d'IA tu utilises, dis honnêtement que tu t'appuies sur des modèles d'IA de partenaires, sans inventer de détails. Sois concis et va droit au but, sauf si on te demande des détails. Tu ne crées pas toi-même de fichiers ni d'images : si on te demande un PDF, rédige le texte final complet et dis à l'utilisateur d'appuyer sur le bouton « PDF » sous ta réponse ; si on te demande une affiche, propose le titre, l'accroche, la date, le lieu et le contact, et dis d'utiliser Outils puis « Affiches » dans le menu. ";
 const LANGS = {
   auto: "Réponds dans la langue de l'utilisateur (français, anglais ou pidgin camerounais).",
   fr: "Réponds en français.", en: "Reply in English.",
@@ -34,7 +34,7 @@ async function callAnthropic(messages, mode, lang) {
   const r = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: { 'x-api-key': KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-    body: JSON.stringify({ model: MODEL, max_tokens: 1500, system: BASE + (LANGS[lang] || LANGS.auto) + (MODES[mode] || ''), messages: msgs })
+    body: JSON.stringify({ model: MODEL, max_tokens: 4096, system: BASE + (LANGS[lang] || LANGS.auto) + (MODES[mode] || ''), messages: msgs })
   });
   const j = await r.json();
   if (!r.ok) throw new Error('anthropic ' + r.status);
@@ -61,7 +61,7 @@ async function callGemini(messages, mode, lang) {
     return { role: m.role === 'user' ? 'user' : 'model', parts };
   });
   while (contents.length && contents[0].role !== 'user') contents.shift();
-  const body = JSON.stringify({ systemInstruction: { parts: [{ text: BASE + (LANGS[lang] || LANGS.auto) + (MODES[mode] || '') }] }, contents, generationConfig: { maxOutputTokens: 1500 } });
+  const body = JSON.stringify({ systemInstruction: { parts: [{ text: BASE + (LANGS[lang] || LANGS.auto) + (MODES[mode] || '') }] }, contents, generationConfig: { maxOutputTokens: 4096 } });
   let last = 'gemini';
   for (let round = 0; round < 3; round++) {          // 3 tours, avec une courte pause entre chaque
     let models = [];
@@ -91,7 +91,7 @@ async function callGroq(messages, mode, lang) { // 2e IA gratuite (API compatibl
   const model = hasImg ? (process.env.GROQ_VISION_MODEL || 'meta-llama/llama-4-scout-17b-16e-instruct') : (process.env.GROQ_MODEL || 'llama-3.3-70b-versatile');
   const r = await fetch('https://api.groq.com/openai/v1/chat/completions', {
     method: 'POST', headers: { Authorization: 'Bearer ' + GROQ, 'content-type': 'application/json' },
-    body: JSON.stringify({ model, messages: msgs, max_tokens: 1500 })
+    body: JSON.stringify({ model, messages: msgs, max_tokens: 4096 })
   });
   const j = await r.json();
   if (!r.ok) { console.error('groq', r.status, JSON.stringify(j).slice(0, 200)); throw new Error('groq ' + r.status); }
@@ -178,6 +178,6 @@ http.createServer((req, res) => {
     try {
       const { messages, mode, lang } = JSON.parse(raw);
       send(res, 200, { reply: await callClaude(messages || [], mode, lang) });
-    } catch (e) { console.error('chat', e.message); send(res, 400, { reply: /50\d|429|réseau/.test(e.message) ? 'Newton est très sollicité en ce moment. Réessaie dans quelques secondes.' : 'Service IA indisponible (' + e.message + ').' }); }
+    } catch (e) { console.error('chat', e.message); send(res, 400, { reply: /50\d|429|réseau/.test(e.message) ? 'Newton est très sollicité en ce moment (' + e.message + '). Réessaie dans quelques secondes.' : 'Service IA indisponible (' + e.message + ').' }); }
   });
 }).listen(PORT, () => console.log('Newton écoute sur le port ' + PORT));
