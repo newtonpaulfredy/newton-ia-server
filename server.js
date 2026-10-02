@@ -4,8 +4,9 @@ const KEY = process.env.ANTHROPIC_API_KEY, MODEL = process.env.MODEL || 'claude-
 const ORIGIN = process.env.ALLOWED_ORIGIN || '*', PORT = process.env.PORT || 3000;
 const WA_TOKEN = process.env.WHATSAPP_TOKEN, WA_PHONE = process.env.WHATSAPP_PHONE_ID, WA_VERIFY = process.env.WHATSAPP_VERIFY_TOKEN;
 const GKEY = process.env.GEMINI_API_KEY, GMODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
-const PROVIDER = process.env.PROVIDER || (KEY ? 'anthropic' : 'gemini'); // 'gemini' = clé gratuite Google AI Studio
-if ((PROVIDER === 'anthropic' && !KEY) || (PROVIDER === 'gemini' && !GKEY)) { console.error('Il manque la clé : GEMINI_API_KEY (gratuit) ou ANTHROPIC_API_KEY.'); process.exit(1); }
+const GROQ = process.env.GROQ_API_KEY; // facultatif : 2e IA gratuite (Groq) utilisée si Gemini est surchargé
+const PROVIDER = process.env.PROVIDER || (KEY ? 'anthropic' : GKEY ? 'gemini' : 'groq');
+if ((PROVIDER === 'anthropic' && !KEY) || (PROVIDER === 'gemini' && !GKEY) || (PROVIDER === 'groq' && !GROQ)) { console.error('Il manque la clé : GEMINI_API_KEY (gratuit), GROQ_API_KEY ou ANTHROPIC_API_KEY.'); process.exit(1); }
 
 const BASE = "Tu es Newton IA, un assistant camerounais clair, chaleureux et précis. ";
 const LANGS = {
@@ -40,14 +41,17 @@ async function callAnthropic(messages, mode, lang) {
   return j.content.filter(b => b.type === 'text').map(b => b.text).join('');
 }
 
-let gm = process.env.GEMINI_MODEL || null; // laissé vide : Newton choisit seul un modèle Gemini « flash » disponible
-async function pickModel(skip) {
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+let gList = null, gAt = 0;
+async function geminiModels() { // modèles « flash » disponibles pour ta clé, du plus récent au plus léger
+  if (gList && Date.now() - gAt < 600000) return gList;
   const r = await fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=200', { headers: { 'x-goog-api-key': GKEY } });
   const j = await r.json();
   const ok = (j.models || []).filter(m => (m.supportedGenerationMethods || []).includes('generateContent'))
-    .map(m => m.name.replace('models/', '')).filter(n => /^gemini-[\d.]+-flash$/.test(n) && !skip.includes(n));
-  ok.sort((a, b) => parseFloat(b.split('-')[1]) - parseFloat(a.split('-')[1]));
-  return ok[0] || null;
+    .map(m => m.name.replace('models/', '')).filter(n => /^gemini-[\d.]+-flash(-lite)?$/.test(n));
+  ok.sort((a, b) => parseFloat(b.split('-')[1]) - parseFloat(a.split('-')[1]) || (a.endsWith('-lite') - b.endsWith('-lite')));
+  gList = [process.env.GEMINI_MODEL, ...ok].filter((x, i, a) => x && a.indexOf(x) === i); gAt = Date.now();
+  return gList;
 }
 async function callGemini(messages, mode, lang) {
   let contents = messages.slice(-20).map(m => {
@@ -58,23 +62,48 @@ async function callGemini(messages, mode, lang) {
   });
   while (contents.length && contents[0].role !== 'user') contents.shift();
   const body = JSON.stringify({ systemInstruction: { parts: [{ text: BASE + (LANGS[lang] || LANGS.auto) + (MODES[mode] || '') }] }, contents, generationConfig: { maxOutputTokens: 1500 } });
-  const tried = [];
-  for (let k = 0; k < 3; k++) {
-    if (!gm) gm = await pickModel(tried);
-    if (!gm) throw new Error('gemini: aucun modèle disponible pour cette clé');
-    const r = await fetch('https://generativelanguage.googleapis.com/v1beta/models/' + gm + ':generateContent', {
-      method: 'POST', headers: { 'x-goog-api-key': GKEY, 'content-type': 'application/json' }, body
-    });
-    const j = await r.json();
-    if (r.status === 404) { console.error('gemini 404 pour', gm, '- recherche d\'un autre modèle'); tried.push(gm); gm = null; continue; }
-    if (!r.ok) { console.error('gemini', r.status, JSON.stringify(j).slice(0, 300)); throw new Error('gemini ' + r.status); }
-    console.log('gemini ok avec', gm);
-    const t = ((j.candidates || [])[0]?.content?.parts || []).map(p => p.text || '').join('');
-    return t || "Je n'ai pas pu répondre à cette demande. Reformule ou change de sujet.";
+  let last = 'gemini';
+  for (let round = 0; round < 3; round++) {          // 3 tours, avec une courte pause entre chaque
+    let models = [];
+    try { models = await geminiModels(); } catch (e) { last = 'gemini réseau'; }
+    for (const m of models.slice(0, 3)) {             // si un modèle est surchargé, on essaie le suivant
+      let r, j;
+      try { r = await fetch('https://generativelanguage.googleapis.com/v1beta/models/' + m + ':generateContent', { method: 'POST', headers: { 'x-goog-api-key': GKEY, 'content-type': 'application/json' }, body }); j = await r.json(); }
+      catch (e) { last = 'gemini réseau'; continue; }
+      if (r.ok) {
+        const t = ((j.candidates || [])[0]?.content?.parts || []).map(p => p.text || '').join('');
+        console.log('gemini ok avec', m);
+        return t || "Je n'ai pas pu répondre à cette demande. Reformule ou change de sujet.";
+      }
+      last = 'gemini ' + r.status; console.error(last, m, JSON.stringify(j).slice(0, 200));
+      if (r.status === 400 || r.status === 403) throw new Error(last); // clé refusée ou requête invalide : inutile de réessayer
+    }
+    if (round < 2) await sleep(1000 * (round + 1));
   }
-  throw new Error('gemini 404');
+  throw new Error(last);
 }
-const callClaude = (m, mode, lang) => PROVIDER === 'gemini' ? callGemini(m, mode, lang) : callAnthropic(m, mode, lang);
+async function callGroq(messages, mode, lang) { // 2e IA gratuite (API compatible OpenAI)
+  const rec = messages.slice(-12), lastM = rec[rec.length - 1] || {}, hasImg = typeof lastM.image === 'string' && IMG.test(lastM.image);
+  const msgs = [{ role: 'system', content: BASE + (LANGS[lang] || LANGS.auto) + (MODES[mode] || '') }].concat(rec.map((m, i) => {
+    const text = String(m.content || '').slice(0, 8000) || 'Analyse cette image.';
+    return { role: m.role === 'user' ? 'user' : 'assistant', content: hasImg && i === rec.length - 1 ? [{ type: 'text', text }, { type: 'image_url', image_url: { url: m.image } }] : text };
+  }));
+  const model = hasImg ? (process.env.GROQ_VISION_MODEL || 'meta-llama/llama-4-scout-17b-16e-instruct') : (process.env.GROQ_MODEL || 'llama-3.3-70b-versatile');
+  const r = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    method: 'POST', headers: { Authorization: 'Bearer ' + GROQ, 'content-type': 'application/json' },
+    body: JSON.stringify({ model, messages: msgs, max_tokens: 1500 })
+  });
+  const j = await r.json();
+  if (!r.ok) { console.error('groq', r.status, JSON.stringify(j).slice(0, 200)); throw new Error('groq ' + r.status); }
+  console.log('groq ok avec', model);
+  return (j.choices?.[0]?.message?.content) || "Je n'ai pas pu répondre à cette demande.";
+}
+async function callClaude(m, mode, lang) {
+  if (PROVIDER === 'anthropic') return callAnthropic(m, mode, lang);
+  if (PROVIDER === 'groq') return callGroq(m, mode, lang);
+  try { return await callGemini(m, mode, lang); }
+  catch (e) { if (!GROQ) throw e; console.error('Gemini indisponible (' + e.message + '), bascule vers Groq'); return callGroq(m, mode, lang); }
+}
 
 const hits = new Map(); // 20 messages par minute et par adresse ou numéro
 function limited(id) {
@@ -149,6 +178,6 @@ http.createServer((req, res) => {
     try {
       const { messages, mode, lang } = JSON.parse(raw);
       send(res, 200, { reply: await callClaude(messages || [], mode, lang) });
-    } catch (e) { console.error('chat', e.message); send(res, 400, { reply: 'Service IA indisponible (' + e.message + ').' }); }
+    } catch (e) { console.error('chat', e.message); send(res, 400, { reply: /50\d|429|réseau/.test(e.message) ? 'Newton est très sollicité en ce moment. Réessaie dans quelques secondes.' : 'Service IA indisponible (' + e.message + ').' }); }
   });
 }).listen(PORT, () => console.log('Newton écoute sur le port ' + PORT));
