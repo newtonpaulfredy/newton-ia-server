@@ -2,7 +2,12 @@
 const http = require('http'), crypto = require('crypto');
 const KEY = process.env.ANTHROPIC_API_KEY, MODEL = process.env.MODEL || 'claude-sonnet-5-5';
 const ORIGIN = process.env.ALLOWED_ORIGIN || '*', PORT = process.env.PORT || 3000;
-const WA_TOKEN = process.env.WHATSAPP_TOKEN, WA_PHONE = process.env.WHATSAPP_PHONE_ID, WA_VERIFY = process.env.WHATSAPP_VERIFY_TOKEN;
+
+// CORRECTION POUR TES VARIABLES RAILWAY - accepte tous les noms possibles
+const WA_TOKEN = process.env.WHATSAPP_TOKEN || process.env.WHATSAPP_ACCESS_TOKEN || process.env.WHATS_TOKEN;
+const WA_PHONE = process.env.WHATSAPP_PHONE_ID || process.env.PHONE_NUMBER_ID || process.env.PHONE_ID || process.env.PHONE || process.env.PHONE_NUMBER;
+const WA_VERIFY = process.env.WHATSAPP_VERIFY_TOKEN || process.env.VERIFY_TOKEN || process.env.VERIFICATION_TOKEN || process.env.VERIF_TOKEN;
+
 const GKEY = process.env.GEMINI_API_KEY, GMODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
 const GROQ = process.env.GROQ_API_KEY;
 const PROVIDER = process.env.PROVIDER || (KEY? 'anthropic' : GKEY? 'gemini' : 'groq');
@@ -122,7 +127,6 @@ function readBody(req, cb) {
   req.on('end', () => cb(Buffer.concat(parts)));
 }
 
-/* ---------- WhatsApp (API Cloud de Meta) ---------- */
 const wa = new Map();
 const GRAPH = 'https://graph.facebook.com/v21.0/';
 async function waSend(to, text) {
@@ -160,22 +164,23 @@ async function handleWA(m) {
 http.createServer((req, res) => {
   const url = new URL(req.url, 'http://x');
 
-  // PAGE D'ACCUEIL POUR TEST
   if (url.pathname === '/' && req.method === 'GET') {
     res.writeHead(200, {'Content-Type':'text/html'});
-    return res.end('<h1>Newton IA OK</h1><p>Serveur en ligne sur port '+PORT+'</p><p>Routes: /webhook et /whatsapp</p>');
+    return res.end('<h1>Newton IA OK</h1><p>Serveur en ligne sur port '+PORT+'</p><p>Routes: /webhook et /whatsapp actives</p><p>Phone:'+ (WA_PHONE? 'OK' : 'MANQUE') +' Token:'+ (WA_TOKEN? 'OK' : 'MANQUE') +' Verify:'+ (WA_VERIFY? 'OK' : 'MANQUE') +'</p>');
   }
 
-  // CORRECTION : on accepte /webhook ET /whatsapp
   if (url.pathname === '/whatsapp' || url.pathname === '/webhook') {
-    if (!WA_TOKEN ||!WA_PHONE ||!WA_VERIFY) return send(res, 404, {}, false);
+    if (!WA_TOKEN ||!WA_PHONE ||!WA_VERIFY) {
+      console.error('VARIABLES MANQUANTES: TOKEN=',!!WA_TOKEN, ' PHONE=',!!WA_PHONE, ' VERIFY=',!!WA_VERIFY);
+      return send(res, 500, {error: 'Variables manquantes'}, false);
+    }
     if (req.method === 'GET') {
-      console.log('Verification attempt - token recu:', url.searchParams.get('hub.verify_token'), ' attendu:', WA_VERIFY);
+      console.log('Verification attempt - recu:', url.searchParams.get('hub.verify_token'), ' attendu:', WA_VERIFY);
       if (url.searchParams.get('hub.mode') === 'subscribe' && url.searchParams.get('hub.verify_token') === WA_VERIFY) {
         console.log('WEBHOOK VERIFIE!');
         res.writeHead(200); return res.end(url.searchParams.get('hub.challenge'));
       }
-      res.writeHead(403); return res.end();
+      res.writeHead(403); return res.end('Token invalide');
     }
     return readBody(req, raw => {
       if (!okSig(raw, req.headers['x-hub-signature-256'])) { res.writeHead(403); return res.end(); }
@@ -192,4 +197,4 @@ http.createServer((req, res) => {
       send(res, 200, { reply: await callClaude(messages || [], mode, lang) });
     } catch (e) { console.error('chat', e.message); send(res, 400, { reply: /50\d|429|réseau/.test(e.message)? 'Newton est très sollicité en ce moment (' + e.message + '). Réessaie dans quelques secondes.' : 'Service IA indisponible (' + e.message + ').' }); }
   });
-}).listen(PORT, () => console.log('Newton écoute sur le port ' + PORT));
+}).listen(PORT, () => console.log('Newton ecoute sur le port ' + PORT + ' Phone:' + WA_PHONE));
