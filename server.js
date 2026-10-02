@@ -88,7 +88,7 @@ async function callGroq(messages, mode, lang) { // 2e IA gratuite (API compatibl
     const text = String(m.content || '').slice(0, 8000) || 'Analyse cette image.';
     return { role: m.role === 'user' ? 'user' : 'assistant', content: hasImg && i === rec.length - 1 ? [{ type: 'text', text }, { type: 'image_url', image_url: { url: m.image } }] : text };
   }));
-  const model = hasImg ? (process.env.GROQ_VISION_MODEL || 'meta-llama/llama-4-scout-17b-16e-instruct') : (process.env.GROQ_MODEL || 'llama-3.3-70b-versatile');
+  const model = hasImg? (process.env.GROQ_VISION_MODEL || 'meta-llama/llama-4-scout-17b-16e-instruct') : (process.env.GROQ_MODEL || 'openai/gpt-oss-20b');
   const r = await fetch('https://api.groq.com/openai/v1/chat/completions', {
     method: 'POST', headers: { Authorization: 'Bearer ' + GROQ, 'content-type': 'application/json' },
     body: JSON.stringify({ model, messages: msgs, max_tokens: 4096 })
